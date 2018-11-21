@@ -7,7 +7,7 @@ import com.ctre.phoenix.motorcontrol.FeedbackDevice
 import com.ctre.phoenix.motorcontrol.NeutralMode
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonSRX
 import edu.wpi.first.wpilibj.PWMSpeedController
-import org.sertain.RobotLifecycle
+import org.sertain.Controllable
 import org.sertain.hardware.BreakWhenStarted.minusAssign
 import org.sertain.hardware.BreakWhenStarted.plusAssign
 import java.util.Timer
@@ -144,13 +144,10 @@ public fun PWMSpeedController.invert(inverted: Boolean = true) = apply { setInve
  *
  * @see autoBreak
  */
-private object BreakWhenStarted : RobotLifecycle {
+private object BreakWhenStarted : Controllable {
     private val talons = mutableSetOf<Talon>()
     private var updateTask: TimerTask? = null
 
-    init {
-        RobotLifecycle.addListener(this)
-    }
 
     operator fun BreakWhenStarted.plusAssign(talon: Talon) {
         synchronized(talons) { talons += talon }
@@ -160,12 +157,12 @@ private object BreakWhenStarted : RobotLifecycle {
         synchronized(talons) { talons -= talon }
     }
 
-    override fun onStart() {
+    override fun onEnabled() {
         updateTask?.cancel()
         set(true)
     }
 
-    override fun onStop() {
+    override fun onDisabled() {
         updateTask = Timer().schedule(TimeUnit.SECONDS.toMillis(5)) { set(false) }
     }
 

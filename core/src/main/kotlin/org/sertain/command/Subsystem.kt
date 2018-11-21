@@ -2,11 +2,11 @@
 @file:JvmName("SubsystemUtils")
 package org.sertain.command
 
-import org.sertain.RobotLifecycle
+import org.sertain.Controllable
 import edu.wpi.first.wpilibj.command.Subsystem as WpiLibSubsystem
 
 /** @see edu.wpi.first.wpilibj.command.Subsystem */
-public abstract class Subsystem : WpiLibSubsystem(), RobotLifecycle {
+public abstract class Subsystem : WpiLibSubsystem(), Controllable {
     /** @see edu.wpi.first.wpilibj.command.Subsystem.setDefaultCommand */
     open val defaultCommand: CommandBase? = null
 

@@ -2,206 +2,125 @@
 @file:JvmName("RobotUtils")
 package org.sertain
 
-import android.support.annotation.VisibleForTesting
 import edu.wpi.first.wpilibj.IterativeRobot
-import edu.wpi.first.wpilibj.command.Scheduler
 import org.sertain.command.Subsystem
 
-private typealias LifecycleDistributor = RobotLifecycle.Companion.Distributor
-
-/**
- * Represents the standard FRC robot lifecycle.
- *
- * Note: "Lifecycle" in this context means the different states the robot can be in such as enabled
- * or disabled.
- */
-public interface RobotLifecycle {
-    /**
-     * Indicates robot creation. This method will be called exactly once right after basic robot
-     * initialization has occurred. This is a good time to perform any setup necessary for the
-     * entire robot's lifetime.
-     */
-    public fun onCreate() = Unit
-
-    /**
-     * Indicates that the robot is being enabled. This method will be called before the robot
-     * becomes enabled in either the teleoperated or autonomous mode. This would be a good time to
-     * perform actions to prepare the robot for movement.
-     */
-    public fun onStart() = Unit
-
-    /**
-     * Indicates that the robot is being enabled in the autonomous mode. This method will be called
-     * before the robot becomes enabled in autonomous mode.
-     */
-    public fun onAutoStart() = Unit
-
-    /**
-     * Indicates that the robot is being enabled in the teleoperated mode. This method will be
-     * called before the robot becomes enabled in teleoperated mode.
-     */
-    public fun onTeleopStart() = Unit
-
-    /**
-     * Runs periodically (default = every 20ms) while the robot is turned on. It need not be enabled
-     * for this method to be called.
-     */
-    public fun execute() = Unit
-
-    /** Runs periodically (default = every 20ms) while the robot is in the disabled state. */
-    public fun executeDisabled() = Unit
-
-    /** Runs periodically (default = every 20ms) while the robot is in the teleoperated mode. */
-    public fun executeTeleop() = Unit
-
-    /** Runs periodically (default = every 20ms) while the robot is in the autonomous mode. */
-    public fun executeAuto() = Unit
-
-    /**
-     * Indicates that the teleoperated mode has just terminated. This method will be called after
-     * the teleoperated mode has terminated.
-     */
-    public fun onTeleopStop() = Unit
-
-    /**
-     * Indicates that the autonomous mode has just terminated. This method will be called after the
-     * autonomous mode has terminated.
-     */
-    public fun onAutoStop() = Unit
-
-    /**
-     * Indicates that the robot has become disabled. This method will be called upon entering the
-     * disabled state.
-     */
-    public fun onStop() = Unit
-
-    companion object {
-        internal var state = Robot.State.DISABLED
-        @VisibleForTesting
-        internal val listeners = mutableSetOf<RobotLifecycle>()
-
-        internal fun rawAddListener(lifecycle: RobotLifecycle) {
-            listeners += lifecycle
-        }
-
-        /**
-         * Adds a listener for [RobotLifecycle] events.
-         *
-         * @param lifecycle the lifecycle object to receive callbacks
-         */
-        public fun addListener(lifecycle: RobotLifecycle) {
-            lifecycle.onCreate()
-            when (state) {
-                Robot.State.TELEOP -> lifecycle.onTeleopStart()
-                Robot.State.AUTO -> lifecycle.onAutoStart()
-                Robot.State.DISABLED -> Unit
-            }
-
-            synchronized(listeners) { listeners += lifecycle }
-        }
-
-        /**
-         * Removes a listener for [RobotLifecycle] events.
-         *
-         * @param lifecycle the object to stop receiving callbacks
-         */
-        public fun removeListener(lifecycle: RobotLifecycle) {
-            synchronized(listeners) { listeners -= lifecycle }
-        }
-
-        internal object Distributor : RobotLifecycle {
-            override fun onCreate() = notify { onCreate() }
-
-            override fun onStart() = notify { onStart() }
-
-            override fun onTeleopStart() = notify(Robot.State.TELEOP) { onTeleopStart() }
-
-            override fun onAutoStart() = notify(Robot.State.AUTO) { onAutoStart() }
-
-            override fun execute() = notify { execute() }
-
-            override fun executeDisabled() = notify { executeDisabled() }
-
-            override fun executeTeleop() = notify { executeTeleop() }
-
-            override fun executeAuto() = notify { executeAuto() }
-
-            override fun onTeleopStop() = notify { onTeleopStop() }
-
-            override fun onAutoStop() = notify { onAutoStop() }
-
-            override fun onStop() = notify(Robot.State.DISABLED) { onStop() }
-
-            private inline fun notify(
-                    state: Robot.State? = null,
-                    block: RobotLifecycle.() -> Unit
-            ) {
-                state?.let { RobotLifecycle.state = it }
-                synchronized(listeners) { for (listener in listeners.toList()) listener.block() }
-            }
-        }
-    }
+enum class RobotState {
+    DISABLED, AUTO, TELEOP
 }
 
-/** Base robot class which must be used for [RobotLifecycle] callbacks to work. */
-public abstract class Robot(vararg subsystems: Subsystem) : IterativeRobot(), RobotLifecycle {
-    private var mode = State.DISABLED
+/**
+ * The base interface for robot control.
+ */
+public interface Controllable {
+    public fun onCreate() = Unit
+
+    public fun onEnabled() = Unit
+
+    public fun onDisabled() = Unit
+
+    public fun onAutoStart() = Unit
+
+    public fun onTeleopStart() = Unit
+
+    public fun onAutoEnd() = Unit
+
+    public fun onTeleopEnd() = Unit
+
+    public fun onTick() = Unit
+
+    public fun onTickAuto() = Unit
+
+    public fun onTickTeleop() = Unit
+
+    public fun onTickDisabled() = Unit
+}
+
+/**
+ * An abstract wrapper over IterativeRobot that forwards events to the Controllable implementation
+ */
+abstract class WPIRobotLink : Controllable, IterativeRobot() {
+    private var state: RobotState = RobotState.DISABLED
         set(value) {
             if (value != field) {
                 when (field) {
-                    State.TELEOP -> LifecycleDistributor.onTeleopStop()
-                    State.AUTO -> LifecycleDistributor.onAutoStop()
-                    State.DISABLED -> Unit
+                    RobotState.DISABLED -> Unit
+                    RobotState.AUTO -> onAutoEnd()
+                    RobotState.TELEOP -> onTeleopEnd()
                 }
                 field = value
             }
         }
 
-    init {
-        @Suppress("LeakingThis") // Invoked through reflection and initialized later
-        RobotLifecycle.rawAddListener(this)
+    override fun robotInit() = onCreate()
 
-        subsystems.forEach { RobotLifecycle.addListener(it) }
+    override fun robotPeriodic() = onTick()
 
-        val existingHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            println("Exception occurred on thread $t:")
-            e.printStackTrace()
-            existingHandler.uncaughtException(t, e)
+    override fun disabledInit() {
+        state = RobotState.DISABLED
+        onDisabled()
+    }
+
+    override fun disabledPeriodic() = onTickDisabled()
+
+    override fun autonomousInit() {
+        state = RobotState.AUTO
+        onEnabled() // Should we be calling this here?
+        onAutoStart()
+    }
+
+    override fun autonomousPeriodic() = onTickAuto()
+
+    override fun teleopInit() {
+        state = RobotState.TELEOP
+        onTeleopStart()
+    }
+
+    override fun teleopPeriodic() = onTickTeleop()
+}
+
+public abstract class Robot(vararg subsystems: Subsystem) : WPIRobotLink() {
+    private val robotSubsystems = subsystems
+
+    private inline fun callSubsystems(func: Controllable.() -> Unit) {
+        for (system in robotSubsystems) {
+            system.func()
         }
     }
 
-    override fun robotInit() = LifecycleDistributor.onCreate()
-
-    override fun robotPeriodic() {
-        Scheduler.getInstance().run()
-        LifecycleDistributor.execute()
+    override fun onTeleopStart() {
+        super.onTeleopStart()
+        callSubsystems { onTeleopStart() }
     }
 
-    override fun disabledInit() {
-        mode = State.DISABLED
-        LifecycleDistributor.onStop()
+    override fun onTickTeleop() {
+        super.onTickTeleop()
+        callSubsystems { onTickTeleop() }
     }
 
-    override fun disabledPeriodic() = LifecycleDistributor.executeDisabled()
-
-    override fun autonomousInit() {
-        mode = State.AUTO
-        LifecycleDistributor.onStart()
-        LifecycleDistributor.onAutoStart()
+    override fun onTeleopEnd() {
+        super.onTeleopEnd()
+        callSubsystems { onTeleopEnd() }
     }
 
-    override fun autonomousPeriodic() = LifecycleDistributor.executeAuto()
-
-    override fun teleopInit() {
-        mode = State.TELEOP
-        LifecycleDistributor.onStart()
-        LifecycleDistributor.onTeleopStart()
+    override fun onAutoStart() {
+        super.onAutoStart()
+        callSubsystems { onAutoStart() }
     }
 
-    override fun teleopPeriodic() = LifecycleDistributor.executeTeleop()
+    override fun onTickAuto() {
+        super.onTickAuto()
+        callSubsystems { onTickAuto() }
+    }
 
-    internal enum class State {
-        DISABLED, AUTO, TELEOP
+    override fun onAutoEnd() {
+        super.onAutoEnd()
+        callSubsystems { onAutoEnd() }
+    }
+}
+
+object Robo: Robot() {
+    override fun onAutoStart() {
+        print("Hello world!")
     }
 }
